@@ -115,13 +115,10 @@ bool rgb_matrix_indicators_user(void) {
     return false;
 }
 
+// geometry (setting center)
 static float center_x = 0.0f;
 static float center_y = 0.0f;
 static bool geometry_ready = false;
-
-#define RIPPLE_SPEED  1.2f
-#define RIPPLE_DECAY  0.92f
-#define BASS_TRIGGER 40
 
 static void audio_ripple_compute_center(void) {
     uint8_t led_g = 55;
@@ -133,6 +130,28 @@ static void audio_ripple_compute_center(void) {
     geometry_ready = true;
 }
 
+
+// visual parameters
+typedef struct {
+    float speed;
+    float decay;
+    float base_width;
+    float mid_width_gain;
+    float sparkle_strength;
+    float sparkle_scale;
+    float bass_threshold;
+} ripple_params_t;
+
+static ripple_params_t params = {
+    .speed = 2.5f,
+    .decay = 0.97f,
+    .base_width = 6.0f,
+    .mid_width_gain = 14.0f,
+    .sparkle_strength = 0.6f,
+    .sparkle_scale = 200.0f,
+    .bass_threshold = 20.0f,
+};
+
 static float ripple_radius = 0.0f;
 static float ripple_energy = 0.0f;
 
@@ -140,38 +159,51 @@ void audio_ripple_render(void) {
     if (!audio_ripple_enabled || !frame_valid) {
         return;
     }
+
     if (!geometry_ready) {
         audio_ripple_compute_center();
     }
 
     uint8_t bass = current_frame.bands[0];
+    float bass_norm = bass / 255.0f;
 
-    if (bass > BASS_TRIGGER) {
-        ripple_energy = bass / 255.0f;
+    float mid  = (current_frame.bands[2] + current_frame.bands[3]) * 0.5f / 255.0f;
+    float high = (current_frame.bands[4] + current_frame.bands[5]) * 0.5f / 255.0f;
+
+    if (bass > params.bass_threshold) {
+        ripple_energy += bass_norm;
+        if (ripple_energy > 1.5f) ripple_energy = 1.5f;
         ripple_radius = 0.0f;
     }
 
-    ripple_energy *= RIPPLE_DECAY;
-    ripple_radius += RIPPLE_SPEED;
-
-    if (ripple_energy < 0.01f) {
-        ripple_energy = 0.0f;
-    }
+    ripple_radius += params.speed;
+    ripple_energy *= params.decay;
+    if (ripple_energy < 0.01f) ripple_energy = 0.0f;
 
     for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
         float dx = g_led_config.point[i].x - center_x;
         float dy = g_led_config.point[i].y - center_y;
-
         float dist = sqrtf(dx * dx + dy * dy);
 
         float diff = fabsf(dist - ripple_radius);
 
-        float brightness = 0.0f;
+        float ring_width = params.base_width + mid * params.mid_width_gain;
 
-        if (diff < 6.0f) {
-            brightness = ripple_energy * (1.0f - diff / 6.0f);
+        float brightness = 0.0f;
+        if (diff < ring_width) {
+            brightness = ripple_energy * (1.0f - diff / ring_width);
         }
-        uint8_t value = (uint8_t)(brightness * 255.0f);
-        rgb_matrix_set_color(i, value, value, value);
+
+        // High-frequency sparkle on outer keys
+        float sparkle = high * (dist / params.sparkle_scale);
+        brightness += sparkle * params.sparkle_strength;
+
+        if (brightness > 1.0f) brightness = 1.0f;
+
+        uint8_t r = (uint8_t)(brightness * 255.0f * bass_norm);
+        uint8_t g = (uint8_t)(brightness * 80.0f  * mid);
+        uint8_t b = (uint8_t)(brightness * 255.0f * high);
+
+        rgb_matrix_set_color(i, r, g, b);
     }
 }
