@@ -59,33 +59,29 @@ void audio_ripple_set_frame(const audio_ripple_frame_t *frame){
 
 #ifdef RAW_ENABLE
 bool via_command_kb(uint8_t *data, uint8_t length) {
-    // Copy Audio Data when on Layer3 [audio visualiser layer]
-    if (get_highest_layer(layer_state | default_layer_state) == 3) {
-        // We expect exactly the audio ripple frame payload
-        if (length < sizeof(audio_ripple_frame_t)) {
-            return false;
-        }
+    if (length < 3) return false;
+    if (data[0] != AUDIO_RIPPLE_MAGIC) return false;
+    if (data[1] != AUDIO_RIPPLE_VERSION) return false;
+
+    uint8_t type = data[2];
+
+    if (type == RIPPLE_PKT_AUDIO) {
+        if (length < sizeof(audio_ripple_frame_t)) return false;
 
         const audio_ripple_frame_t *frame = (const audio_ripple_frame_t *)data;
-
-        if (frame->magic != AUDIO_RIPPLE_MAGIC) {
-            return false;
-        }
-
-        if (frame->version != AUDIO_RIPPLE_VERSION) {
-            return false;
-        }
-
-        if (frame->band_count != AUDIO_RIPPLE_BANDS) {
-            return false;
-        }
-
         audio_ripple_set_frame(frame);
-
         return true;
-    } else {
-        return false;
     }
+
+    if (type == RIPPLE_PKT_CONTROL) {
+        if (length < sizeof(ripple_control_packet_t)) return false;
+
+        const ripple_control_packet_t *pkt = (const ripple_control_packet_t *)data;
+        audio_ripple_handle_control(pkt);
+        return true;
+    }
+
+    return false;
 }
 #   if !defined(VIA_ENABLE)
 // Weak override for raw_hid_receive_user, allowing keymap override
@@ -129,7 +125,6 @@ static void audio_ripple_compute_center(void) {
 
     geometry_ready = true;
 }
-
 
 // visual parameters
 typedef struct {
@@ -228,5 +223,31 @@ void audio_ripple_render(void) {
         uint8_t b = (uint8_t)(brightness * 255.0f * high);
 
         rgb_matrix_set_color(i, r, g, b);
+    }
+}
+
+void audio_ripple_handle_control(const ripple_control_packet_t *pkt) {
+    float v = pkt->value;
+
+    switch (pkt->param) {
+        case RIPPLE_PARAM_SPEED:
+            params.speed = v / 100.0f;
+            break;
+
+        case RIPPLE_PARAM_DECAY:
+            params.decay = v / 1000.0f;
+            break;
+
+        case RIPPLE_PARAM_BASE_WIDTH:
+            params.base_width = v / 100.0f;
+            break;
+
+        case RIPPLE_PARAM_MID_GAIN:
+            params.mid_width_gain = v / 100.0f;
+            break;
+
+        case RIPPLE_PARAM_SPARKLE:
+            params.sparkle_strength = v / 100.0f;
+            break;
     }
 }
