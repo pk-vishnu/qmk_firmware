@@ -152,8 +152,15 @@ static ripple_params_t params = {
     .bass_threshold = 20.0f,
 };
 
-static float ripple_radius = 0.0f;
-static float ripple_energy = 0.0f;
+#define MAX_RIPPLES 4
+
+typedef struct {
+    float radius;
+    float energy;
+    bool  active;
+} ripple_t;
+
+static ripple_t ripples[MAX_RIPPLES];
 
 void audio_ripple_render(void) {
     if (!audio_ripple_enabled || !frame_valid) {
@@ -171,27 +178,43 @@ void audio_ripple_render(void) {
     float high = (current_frame.bands[4] + current_frame.bands[5]) * 0.5f / 255.0f;
 
     if (bass > params.bass_threshold) {
-        ripple_energy += bass_norm;
-        if (ripple_energy > 1.5f) ripple_energy = 1.5f;
-        ripple_radius = 0.0f;
+        // Find a free ripple slot
+        for (int i = 0; i < MAX_RIPPLES; i++) {
+            if (!ripples[i].active) {
+                ripples[i].active = true;
+                ripples[i].radius = 0.0f;
+                ripples[i].energy = bass_norm;
+                break;
+            }
+        }
     }
 
-    ripple_radius += params.speed;
-    ripple_energy *= params.decay;
-    if (ripple_energy < 0.01f) ripple_energy = 0.0f;
+    for (int i = 0; i < MAX_RIPPLES; i++) {
+        if (!ripples[i].active) continue;
+
+        ripples[i].radius += params.speed;
+        ripples[i].energy *= params.decay;
+
+        if (ripples[i].energy < 0.01f) {
+            ripples[i].active = false;
+        }
+    }
 
     for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
         float dx = g_led_config.point[i].x - center_x;
         float dy = g_led_config.point[i].y - center_y;
         float dist = sqrtf(dx * dx + dy * dy);
 
-        float diff = fabsf(dist - ripple_radius);
-
         float ring_width = params.base_width + mid * params.mid_width_gain;
-
         float brightness = 0.0f;
-        if (diff < ring_width) {
-            brightness = ripple_energy * (1.0f - diff / ring_width);
+
+        for (int r = 0; r < MAX_RIPPLES; r++) {
+            if (!ripples[r].active) continue;
+
+            float diff = fabsf(dist - ripples[r].radius);
+            if (diff < ring_width) {
+                brightness += ripples[r].energy * (1.0f - diff / ring_width);
+            }
         }
 
         // High-frequency sparkle on outer keys

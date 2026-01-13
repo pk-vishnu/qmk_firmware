@@ -24,6 +24,9 @@
 #define AUDIO_RIPPLE_VERSION 0x01
 #define AUDIO_RIPPLE_BANDS 6
 
+#define RIPPLE_PKT_AUDIO   0x01
+#define RIPPLE_PKT_CONTROL 0x02
+
 typedef struct{
     uint8_t magic;
     uint8_t version;
